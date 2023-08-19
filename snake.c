@@ -34,34 +34,34 @@
 #define SNAKE_SIZE          TILE_SIZE - SNAKE_PADDING - SNAKE_PADDING
 #define FOOD_PADDING        TILE_SIZE / 8
 #define FOOD_SIZE           TILE_SIZE - FOOD_PADDING - FOOD_PADDING
-#define MAX_DIR_QUEUE       8
 
-struct Position {
+#define GAME_OVER 0
+#define GAME_WON 1
+#define GAME_PAUSE 2
+
+
+typedef struct {
     int x;
     int y;
-};
+} Position;
 
 
+Position* snake_pos;
+Position food_pos = {TILE_SIZE * 2 % HORIZONTAL_TILES, TILE_SIZE * 2 % VERTICAL_TILES};
+size_t player_dir = 0, cur_state = GAME_PAUSE;
+size_t snake_len = 1;
+BOOL forgiveness = FALSE;
 static unsigned long rand_seed = 1;
+
+
 #define rand(max) (rand_seed = (rand_seed * 1664525U + 1013904223U) % ((unsigned long)(max)))
 
 
-char window_name[5] = "SNAKE";
-struct Position* snake_pos;
-struct Position food_pos = {TILE_SIZE * 2 % HORIZONTAL_TILES, TILE_SIZE * 2 % VERTICAL_TILES};
-int* dir_queue;
-int player_dir = 0;
-size_t snake_len = 1;
-size_t dir_queue_sz = 0;
-size_t dir_queue_read = 0;
-BOOL forgiveness = FALSE;
-
-
-BOOL PosEqual(struct Position p1, struct Position p2) {
+BOOL PosEqual(Position p1, Position p2) {
     return *(UINT64*)(&p1) == *(UINT64*)(&p2);
 }
 
-BOOL PosExists(struct Position p) {
+BOOL PosExists(Position p) {
     size_t i;
     for (i = 0; i < snake_len; i++) {
         if (PosEqual(snake_pos[i], p)) {
@@ -85,11 +85,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_PAINT: {
             PAINTSTRUCT ctx;
             HDC device = BeginPaint(hwnd, &ctx);
+            HBRUSH handle = CreateSolidBrush(RGB(0, 255, 0));
 
             SelectObject(device, GetStockObject(NULL_PEN));
-            SelectObject(device, CreateSolidBrush(0x00FF00));
+            SelectObject(device, handle);
 
-            struct Position food_pos_px;
+            Position food_pos_px;
             food_pos_px.x = food_pos.x * TILE_SIZE + FOOD_PADDING;
             food_pos_px.y = food_pos.y * TILE_SIZE + FOOD_PADDING;
 
@@ -100,15 +101,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 food_pos_px.x + FOOD_SIZE,
                 food_pos_px.y + FOOD_SIZE
             );
+            DeleteObject(handle);
 
-            if (player_dir == -1) {
-                SelectObject(device, CreateSolidBrush(0x0000FF));
-            } else {
-                SelectObject(device, CreateSolidBrush(0xFFFFFF));
-            }
+            handle = CreateSolidBrush(RGB(
+                (cur_state != GAME_WON) * 255,
+                (cur_state > GAME_OVER) * 255,
+                (cur_state > GAME_WON) * 255
+            ));
+            SelectObject(device, handle);
 
-            struct Position top_left;
-            struct Position bottom_right;
+
+            Position top_left;
+            Position bottom_right;
             RECT draw_rect;
 
             size_t i;
@@ -140,7 +144,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     draw_rect.left = WINDOW_WIDTH - TILE_SIZE + SNAKE_PADDING;
                     draw_rect.right = WINDOW_WIDTH;
                 }
-                else if (top_left.y == 0 && bottom_right.y == VERTICAL_TILES - 1) {
+                else if (top_left.y == 0 && bottom_right.y == VERTICAL_TILES - 2) {
                     Rectangle(
                         device,
                         draw_rect.left,
@@ -162,12 +166,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 );
             }
 
+            DeleteObject(handle);
             EndPaint(hwnd, &ctx);
             break;
         }
         case WM_KEYDOWN: {
-            if (player_dir < 0) {
-                break;
+            if (cur_state < GAME_PAUSE) {
+                goto check_retry;
             }
 
             switch (wParam) {
@@ -175,32 +180,38 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 case VK_UP:
                 case VK_RIGHT:
                 case VK_DOWN:
-                    dir_queue[dir_queue_sz % MAX_DIR_QUEUE] = wParam;
-                    dir_queue_sz++;
-                    break;
+                    player_dir = wParam;
+                    goto end;
                 case VK_RETURN:
                     player_dir = 0;
-                    dir_queue_read = dir_queue_sz;
-                    break;
+                    cur_state = GAME_PAUSE;
+                    goto end;
+                default: goto end;
+            }
+
+check_retry:
+            if (wParam == 'R') {
+                snake_pos->x = START_X;
+                snake_pos->y = START_Y;
+
+                SetFood();
+                snake_len = 1;
+
+                player_dir = 0;
+                cur_state = GAME_PAUSE;
             }
             break;
         }
         case WM_TIMER: {
-            while (dir_queue_read < dir_queue_sz) {
-                int proposed_dir = dir_queue[dir_queue_read % MAX_DIR_QUEUE];
-                dir_queue_read++;
-
-                if (player_dir != proposed_dir
-                    && proposed_dir + 2 != player_dir
-                    && proposed_dir - 2 != player_dir) {
-                    player_dir = proposed_dir;
-                    break;
-                }
+            if (player_dir != cur_state
+                && player_dir + 2 != cur_state
+                && player_dir - 2 != cur_state) {
+                cur_state = player_dir;
             }
 
-            struct Position new_pos = snake_pos[0];
+            Position new_pos = snake_pos[0];
 
-            switch (player_dir) {
+            switch (cur_state) {
                 case VK_LEFT:
                     new_pos.x--;
                     break;
@@ -214,7 +225,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     new_pos.y++;
                     break;
                 default:
-                    goto end;
+                    break;
             }
 
             if (new_pos.x < 0) {
@@ -236,12 +247,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             if (collided) {
                 if (forgiveness) {
-                    player_dir = -1;
-                    dir_queue_read = dir_queue_sz;
-                    InvalidateRect(hwnd, 0, 1);
+                    player_dir = 0;
+                    cur_state = GAME_OVER;
                 }
                 else {
                     forgiveness = TRUE;
+                    goto end;
                 }
             }
             else {
@@ -258,13 +269,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (ate_food) {
                     if (snake_len == MAX_TILE_COUNT) {
                         food_pos.x = -1;
-                        player_dir = -2;
-                        dir_queue_read = dir_queue_sz;
+                        player_dir = 0;
+                        cur_state = GAME_WON;
                     }
                     SetFood();
                 }
-                InvalidateRect(hwnd, 0, 1);
             }
+            InvalidateRect(hwnd, 0, 1);
             break;
         }
         case WM_CLOSE:
@@ -280,31 +291,26 @@ end:
 int main(void) {
     GetSystemTimeAsFileTime((void*)&rand_seed);
 
-    struct Position snake_pos_stack[MAX_TILE_COUNT];
-    int dir_queue_stack[MAX_DIR_QUEUE];
-
+    Position snake_pos_stack[MAX_TILE_COUNT];
     snake_pos = snake_pos_stack;
-
     snake_pos->x = START_X;
     snake_pos->y = START_Y;
-
-    dir_queue = dir_queue_stack;
 
     WNDCLASSA wc;
     wc.lpfnWndProc = WindowProc;
     wc.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
-    wc.lpszClassName = window_name;
+    wc.lpszClassName = "SNAKE";
     wc.cbClsExtra = 0;
     wc.cbWndExtra = 0;
     wc.hInstance = 0;
     wc.hIcon = 0;
     wc.lpszMenuName = 0;
-    wc.hbrBackground = CreateSolidBrush(0);
+    wc.hbrBackground = GetStockObject(BLACK_BRUSH);
     RegisterClassA(&wc);
 
     HWND hwnd = CreateWindowA(
-        window_name,
-        window_name,
+        "SNAKE",
+        "SNAKE",
         WINDOW_STYLE,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -319,7 +325,6 @@ int main(void) {
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
 

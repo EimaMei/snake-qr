@@ -11,46 +11,40 @@ The original source code was taken from MattKC's "Can you fit a whole game into 
 # Main changes compared to the MattKC version
 - No crinker/compressor is used. Just pure C and compiler shenanigans.
 - A few visual and gameplay fixes to make it much closer to the [HTML version](https://www.mattkc.com/etc/snakeqr/snake-minified.html) that was shown in the video.
-- You can pause the game now by pressing the enter key instead of the pause or win32 0x50 key.
+- You can pause the game now by pressing the enter key instead of the pause or 'P' key.
+- You can retry the game by pressing the 'R' key.
 
 # Main coding changes
 You can view the original [snake.c](https://www.mattkc.com/etc/snakeqr/snake.c) and compare between this and the new one, however here are compiled lists of the changes via categories:
 
 ## Space saving changes
-- A custom `rand` is implemented instead of relying on the C standard version.
-- "SNAKE" is stored as an array of 5 characters, not as a pointer.
+- The input system is reworked to utilize only 2 variables (`player_dir` and the previous valid input, `cur_state`) instead of using an array of valid/invalid inputs. This rework improves the space by a lot as the program does less for the same amount.
 - The food starts at the X and Y position of (`TILE_SIZE` * 2 % `HORIZONTAL_TILES`), (`TILE_SIZE` * 2 % `VERTICAL_TILES`) instead of it being random during startup.
-- For most global variables that don't need to be signed are now `size_t` instead of `int`.
+- All integers are `size_t`.
+- A custom `rand` is implemented instead of relying on the C standard version.
+- The line of code to set the color of the snake depending on the game state (playing/paused/end/won) has been reworked to work completely branchless, saving a few bytes.
+- `WM_KEYDOWN` is faster and does less by the vertue of not having to do `% MAX_DIR_QUEUE` and incrementing `dir_queue_sz`.
+- When getting the valdi input inside `WM_TIMER`, all it does is a simple `if` statement instead of using the old (and to be frank, confusing and weird) `while` system of the original.
 - Removed the `bool moved` variable in `WM_TIMER` and used `goto` instead.
 - Removed the `else` statement at `if (snake_len == MAX_TILE_COUNT)`.
 - Removed `GetModuleHandleA` and `AdjustWindowRect`.
-- Used the stack to allocate `snake_pos` and `dir_queue`, not the heap (meaning `GetProcessHeap`, 2x `HeapAlloc` and `HeapFree` are removed).
+- The program uses the stack now to allocate `snake_pos`, not the heap (meaning `GetProcessHeap`, 2x `HeapAlloc` and `HeapFree` are removed).
+- Because of `dir_queue` not existing, a few bytes are also saved.
 - Removed `if (msg.message == WM_QUIT)` in the main loop.
+- Removed `TranslateMessage` in the main loop.
 
 ## Bug fixes
-NOTE: These bugs aren't present in the HTML version, only in `snake.c`.
-- During startup, `rand_seed` is set by `GetSystemTimeAsFileTime((void*)&rand_seed)`, equivalent to doing `srand(time(0))`. This guarantees that the food position will be at least somewhat randomized during each new session of gameplay, which isn't the case in `snake.c`. However this increase the size of the executable a bit.
-- `SetFood` sometimes generates the Y position to be at the very last vertical tile (tile 12, pos Y being 480), making the food barely visible apart from its top. This was fixed by limiting the maximum count to 11.
-- When the head of the snake goes from top to bottom (Y pos 0 to 480), it is now able to snake around at the very bottom, not even visible anymore. You can also just stay in the bottom for long you want. This is fixed by making the collision detection more tight and teleporting the snake a tile more down when crossing the screen.
+- The original `snake.c` leaked memory by continuously not doing `DeleteObject` when executing `CreateSolidBrush`. It's even stated in the documentation that you *should* use `DeleteObject` once you're done with the brush. However doing this requires *quite* a bit of space, however it is possible after some tinkering.
 
 ## Visual changes
 - The apple is now always set to be green.
 
 ## Misc changes
-- Performance has been generally improved (less branching, `PosEqual` does one check instead of 2).
-- The pause button has been changed from `VK_PAUSE` and `0x50` to `VK_ENTER`.
+- You can now retry the game at anytime by pressing 'R'.
+- Performance has been generally improved (less branching, `PosEqual` does one check instead of 2, etc).
+- The pause button has been changed from `VK_PAUSE` and `P` to `VK_ENTER`.
 - Regular `WNDCLASSA` and `CreateWindowA` are used instead of the expanded versions.
 - The game doesn't overallocate `dir_queue` like it did in the original:
-```c
-int* dir_queue;
-// original snake.c (NOTE: sizeof(Position) == 8, sizeof(*dir_queue) == 4)
-dir_queue = HeapAlloc(heap, 0, sizeof(struct Position)*MAX_DIR_QUEUE);
-
-// new snake.c
-int dir_queue_stack[MAX_DIR_QUEUE];
-// ...
-dir_queue = dir_queue_stack;
-```
 
 # Building
 NOTE: `cl.exe` is assumed to be x86, not x64! Compiling it in 64-bit will considerably increase the size of the binary.
