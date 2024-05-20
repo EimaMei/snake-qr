@@ -55,10 +55,11 @@ static unsigned long rand_seed = 1;
 
 
 #define rand(max) (rand_seed = (rand_seed * 1664525U + 1013904223U) % ((unsigned long)(max)))
+#define SI_TO_U64(ptr)  (*((union { void* in; u64* out; }){ptr}.out))
 
 
 BOOL PosEqual(Position p1, Position p2) {
-    return *(UINT64*)(&p1) == *(UINT64*)(&p2);
+    return SI_TO_U64(&p1) == SI_TO_U64(&p2);
 }
 
 BOOL PosExists(Position p) {
